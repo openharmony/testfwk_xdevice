@@ -209,11 +209,6 @@ class OHJSUnitTestDriver(IDriver):
         self.rerun_all = True
         # 是否为半容器
         self.ohca = False
-        # log
-        self.device_log = None
-        self.hilog = None
-        self.log_proc = None
-        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -222,11 +217,11 @@ class OHJSUnitTestDriver(IDriver):
         pass
 
     def __execute__(self, request):
+        __device = None
         try:
             LOG.debug("Start execute OpenHarmony JSUnitTest")
             self.result = os.path.join(
-                request.config.report_path, "result",
-                '.'.join((request.get_module_name(), "xml")))
+                request.config.report_path, "result", f"{request.get_module_name()}.xml")
             self.config = request.config
             self.config.device = request.config.environment.devices[0]
 
@@ -239,36 +234,12 @@ class OHJSUnitTestDriver(IDriver):
             self.config.device.set_device_report_path(request.config.report_path)
             # 是否为半容器
             self.ohca = check_device_ohca(self.config.device)
-            log_level = self.config.device_log.get(ConfigConst.tag_loglevel, "INFO")
-            if self.ohca:
-                self.device_log = get_device_log_file(
-                    request.config.report_path,
-                    request.config.device.__get_serial__(),
-                    "device_log",
-                    module_name=request.get_module_name(),
-                    repeat=request.config.repeat,
-                    repeat_round=request.get_repeat_round())
-                device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o755)
-                self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
-                with os.fdopen(device_log_open, "a") as device_log_file_pipe:
-                    _, self.hilog_proc = self.config.device.device_log_collector. \
-                        start_catch_device_log(log_file_pipe=device_log_file_pipe,
-                                               hilog_file_pipe=None, log_level=log_level)
-                    self.config.device.device_log_collector.start_hilog_task()
+            __device = self.config.device
+            # 采集日志需要设备对象实现start_catch_log
+            if hasattr(__device.device_log_collector, "start_catch_log"):
+                __device.device_log_collector.start_catch_log(request)
             else:
-                self.hilog = get_device_log_file(
-                    request.config.report_path,
-                    request.config.device.__get_serial__(),
-                    "device_hilog",
-                    module_name=request.get_module_name(),
-                    repeat=request.config.repeat,
-                    repeat_round=request.get_repeat_round())
-                hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o755)
-                self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
-                self.config.device.execute_shell_command(command="hilog -r")
-                with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                    _, self.hilog_proc = self.config.device.device_log_collector. \
-                        start_catch_device_log(hilog_file_pipe=hilog_file_pipe, log_level=log_level)
+                LOG.debug("The device not implement start_catch_log function, don't start catch log! Skip!")
             self._run_oh_jsunit(config_file, request)
         except Exception as exception:
             self.error_message = exception
@@ -278,10 +249,15 @@ class OHJSUnitTestDriver(IDriver):
             raise exception
         finally:
             try:
-                self._handle_logs(request)
-            finally:
-                self.result = check_result_report(
-                    request.config.report_path, self.result, self.error_message, request=request)
+                # 停止采集日志需要设备对象实现stop_catch_log
+                if hasattr(__device.device_log_collector, "stop_catch_log"):
+                    __device.device_log_collector.stop_catch_log(request)
+                else:
+                    LOG.debug("The device not implement stop_catch_log function, don't stop catch log! Skip!")
+            except Exception as e:
+                LOG.warning("stop catch device log error. {}".format(e))
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message, request=request)
 
     def __dry_run_execute__(self, request):
         LOG.debug("Start dry run xdevice JSUnit Test")
@@ -555,31 +531,6 @@ class OHJSUnitTestDriver(IDriver):
             CKit.smartperf, "")
         sp_kits.__check_config__(param_config)
         self.kits.insert(0, sp_kits)
-
-    def _handle_logs(self, request):
-        serial = "{}_{}".format(str(self.config.device.__get_serial__()),
-                                time.time_ns())
-        log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
-        if self.config.device_log.get(ConfigConst.tag_enable) == ConfigConst.device_log_on and \
-                hasattr(self.config.device.device_log_collector,
-                        "start_get_crash_log"):
-            self.config.device.device_log_collector.start_get_crash_log(
-                log_tar_file_name,
-                module_name=request.get_module_name(),
-                repeat=request.config.repeat,
-                repeat_round=request.get_repeat_round())
-        if self.ohca:
-            self.config.device.device_log_collector.stop_hilog_task(
-                log_tar_file_name,
-                module_name=request.get_module_name(),
-                repeat=request.config.repeat,
-                repeat_round=request.get_repeat_round())
-        self.config.device.device_log_collector.remove_log_address(
-            self.device_log, self.hilog)
-        self.config.device.device_log_collector.stop_catch_device_log(
-            self.log_proc)
-        self.config.device.device_log_collector.stop_catch_device_log(
-            self.hilog_proc)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
