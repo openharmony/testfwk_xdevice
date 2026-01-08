@@ -48,11 +48,6 @@ class CppTestDriver(IDriver):
         self.rerun = True
         self.rerun_all = True
         self.runner = None
-        # log
-        self.device_log = None
-        self.hilog = None
-        self.log_proc = None
-        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -61,59 +56,36 @@ class CppTestDriver(IDriver):
         pass
 
     def __execute__(self, request):
+        __device = None
         try:
             LOG.debug("Start execute xdevice extension CppTest")
-
             self.config = request.config
             self.config.device = request.config.environment.devices[0]
-
             config_file = request.root.source.config_file
-            self.result = "%s.xml" % \
-                          os.path.join(request.config.report_path,
-                                       "result", request.root.source.test_name)
-
-            self.device_log = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__(),
-                "device_log",
-                module_name=request.get_module_name(),
-                repeat=request.config.repeat,
-                repeat_round=request.get_repeat_round())
-
-            self.hilog = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__(),
-                "device_hilog",
-                module_name=request.get_module_name(),
-                repeat=request.config.repeat,
-                repeat_round=request.get_repeat_round())
-
-            device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT |
-                                      os.O_APPEND, FilePermission.mode_755)
-            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                                 FilePermission.mode_755)
-            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
-            log_level = self.config.device_log.get(ConfigConst.tag_loglevel, "INFO")
-            with os.fdopen(device_log_open, "a") as log_file_pipe, \
-                    os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
-                    start_catch_device_log(log_file_pipe, hilog_file_pipe, log_level=log_level)
-                self._run_cpp_test(config_file, listeners=request.listeners,
-                                   request=request)
-                log_file_pipe.flush()
-                hilog_file_pipe.flush()
-
+            self.result = os.path.join(
+                request.config.report_path, "result", f"{request.root.source.test_name}.xml")
+            __device = self.config.device
+            # 采集日志需要设备对象实现start_catch_log
+            if hasattr(__device.device_log_collector, "start_catch_log"):
+                __device.device_log_collector.start_catch_log(request)
+            else:
+                LOG.debug("The device not implement start_catch_log function, don't start catch log! Skip!")
+            self._run_cpp_test(config_file, listeners=request.listeners, request=request)
         except Exception as exception:
             self.error_message = exception
             if not getattr(exception, "error_no", ""):
                 setattr(exception, "error_no", "03404")
             LOG.exception(self.error_message, exc_info=False, error_no="03404")
             raise exception
-
         finally:
-            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
-            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
-            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
+            try:
+                # 停止采集日志需要设备对象实现stop_catch_log
+                if hasattr(__device.device_log_collector, "stop_catch_log"):
+                    __device.device_log_collector.stop_catch_log(request)
+                else:
+                    LOG.debug("The device not implement stop_catch_log function, don't stop catch log! Skip!")
+            except Exception as e:
+                LOG.warning("stop catch device log error. {}".format(e))
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message, request=request)
 
