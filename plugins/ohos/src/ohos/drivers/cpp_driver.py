@@ -24,6 +24,7 @@ from ohos.error import ErrorMessage
 from ohos.utils import get_ta_class
 from ohos.utils import group_list
 from ohos.utils import print_not_exist_class
+from xdevice import DataHelper
 from xdevice import Request
 
 __all__ = ["CppTestDriver"]
@@ -78,6 +79,11 @@ class CppTestDriver(IDriver):
             LOG.exception(self.error_message, exc_info=False, error_no="03404")
             raise exception
         finally:
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message, request=request)
+            _test_result = "Failed" if DataHelper.is_result_xml_has_failure_case(self.result) else ""
+            # 设置用例的执行结果，以便实现只在用例失败的时候，抓取设备日志的功能
+            setattr(__device, "_test_result", _test_result)
             try:
                 # 停止采集日志需要设备对象实现stop_catch_log
                 if hasattr(__device.device_log_collector, "stop_catch_log"):
@@ -86,8 +92,6 @@ class CppTestDriver(IDriver):
                     LOG.debug("The device not implement stop_catch_log function, don't stop catch log! Skip!")
             except Exception as e:
                 LOG.warning("stop catch device log error. {}".format(e))
-            self.result = check_result_report(
-                request.config.report_path, self.result, self.error_message, request=request)
 
     def _run_cpp_test(self, config_file, listeners=None, request=None):
         try:

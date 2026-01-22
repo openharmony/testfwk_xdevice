@@ -42,6 +42,7 @@ from ohos.utils import build_new_fault_case
 from ohos.utils import setup_teardown
 from ohos.utils import parse_and_modify_report
 from ohos.utils import build_xml
+from xdevice import DataHelper
 from xdevice import Request
 
 __all__ = ["oh_jsunit_para_parse", "OHJSUnitTestDriver", "OHJSUnitTestRunner", "OHJSLocalTestDriver"]
@@ -224,10 +225,8 @@ class OHJSUnitTestDriver(IDriver):
                 request.config.report_path, "result", f"{request.get_module_name()}.xml")
             self.config = request.config
             self.config.device = request.config.environment.devices[0]
-
             config_file = request.root.source.config_file
             suite_file = request.root.source.source_file
-
             if not suite_file:
                 raise ParamError(ErrorMessage.Common.Code_0301001.format(request.root.source.source_string))
             LOG.debug("Test case file path: %s" % suite_file)
@@ -248,6 +247,11 @@ class OHJSUnitTestDriver(IDriver):
             LOG.exception(self.error_message, exc_info=True, error_no="03409")
             raise exception
         finally:
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message, request=request)
+            _test_result = "Failed" if DataHelper.is_result_xml_has_failure_case(self.result) else ""
+            # 设置用例的执行结果，以便实现只在用例失败的时候，抓取设备日志的功能
+            setattr(__device, "_test_result", _test_result)
             try:
                 # 停止采集日志需要设备对象实现stop_catch_log
                 if hasattr(__device.device_log_collector, "stop_catch_log"):
@@ -256,8 +260,6 @@ class OHJSUnitTestDriver(IDriver):
                     LOG.debug("The device not implement stop_catch_log function, don't stop catch log! Skip!")
             except Exception as e:
                 LOG.warning("stop catch device log error. {}".format(e))
-            self.result = check_result_report(
-                request.config.report_path, self.result, self.error_message, request=request)
 
     def __dry_run_execute__(self, request):
         LOG.debug("Start dry run xdevice JSUnit Test")
