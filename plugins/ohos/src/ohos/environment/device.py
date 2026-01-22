@@ -26,6 +26,7 @@ import copy
 import platform
 import subprocess
 import tempfile
+from datetime import datetime
 from typing import Tuple
 
 from xdevice import DeviceOsType
@@ -971,7 +972,7 @@ class DeviceLogCollector:
     def _set_device_log_level(self, **kwargs):
         # 设备日志级别
         if not self.device_log_level:
-            log_level = kwargs.get("log_level", "INFO")
+            log_level = kwargs.get("log_level", "INFO").upper()
             if log_level not in LOGLEVEL:
                 self.device_log_level = "INFO"
             else:
@@ -986,6 +987,8 @@ class DeviceLogCollector:
         if self._cur_thread_ident != cur_thread_id or self._cur_thread_name != cur_thread_name:
             # 用例连续运行，执行线程会变换，这时更新线程id和开始时间
             self._cur_thread_ident, self._cur_thread_name = cur_thread_id, cur_thread_name
+            self._hilog_begin_time = time.time()
+        if not self._hilog_begin_time:
             self._hilog_begin_time = time.time()
 
     def start_catch_device_log(self, log_file_pipe=None, hilog_file_pipe=None, **kwargs):
@@ -1147,7 +1150,44 @@ class DeviceLogCollector:
                 remotes.update({remote_dir: ""})
             else:
                 remotes.update({base_path: ""})
-        self.get_period_log(remotes, crash_path)
+        if self.device.is_root:
+            self.get_period_log(remotes, crash_path)
+            return
+        # 非root场景获取日志
+        remote = "/data/log/faultlog"
+        self.device.pull_file(remote, crash_path, retry=0)
+        if not os.path.exists(crash_path) or not self._hilog_begin_time:
+            return
+        # 删除不属于用例运行期间产生的日志文件
+        for top, _, nondirs in os.walk(crash_path):
+            try:
+                for f in nondirs:
+                    filepath = os.path.join(top, f)
+                    # 文件名含unix时间戳。如：cppcrash-1924-1765391997031
+                    r1 = re.match(r'\S+-(\d+)$', f)
+                    if r1:
+                        if int(r1.group(1)) / 1000 < self._hilog_begin_time:
+                            LOG.debug('remove crash log that do not belong to this case. {}'.format(filepath))
+                            os.remove(filepath)
+                        continue
+                    # 文件名含格式化时间。如：cppcrash-foundation-5523-20251211023957031.log
+                    r2 = re.match(r'\S+-(\d+)\.[a-zA-Z]+$', f)
+                    if r2:
+                        dt = datetime.strptime(r2.group(1)[:-3], '%Y%m%d%H%M%S')
+                        if dt.timestamp() < self._hilog_begin_time:
+                            LOG.debug('remove crash log that do not belong to this case. {}'.format(filepath))
+                            os.remove(filepath)
+                        continue
+            except Exception as e:
+                LOG.warning('remove crash log that do not belong to this case error. {}'.format(e))
+        # 删除空文件夹
+        for dirpath, dirs, filenames in os.walk(crash_path, topdown=False):
+            try:
+                # 只有当目录中没有文件且没有子目录时，才删除
+                if not filenames and not dirs:
+                    shutil.rmtree(dirpath)
+            except Exception as e:
+                LOG.warning('remove empty dir error. {}'.format(e))
 
     @staticmethod
     def _parse_hilog(log_path, dict_file_name, **kwargs):
@@ -1271,21 +1311,44 @@ class DeviceLogCollector:
                 self.device.pull_file(log_file, local_dir, retry=0)
 
     def start_catch_log(self, request, **kwargs):
+        device_log_cfg = request.config.get(ConfigConst.device_log, {})
+        device_log_on = device_log_cfg.get(ConfigConst.tag_enable) or ConfigConst.device_log_on
+        if device_log_on != ConfigConst.device_log_on:
+            return
         hilog_size = kwargs.get("hilog_size") or "4M"
-        log_level = request.config.device_log.get(ConfigConst.tag_loglevel, "INFO")
-        pull_hdc_log_status = request.config.device_log.get(ConfigConst.tag_hdc, None)
+        log_level = device_log_cfg.get(ConfigConst.tag_loglevel) or "INFO"
+        pull_hdc_log_status = device_log_cfg.get(ConfigConst.tag_hdc, None)
         self.need_pull_hdc_log = False if pull_hdc_log_status and pull_hdc_log_status.lower() == "false" else True
         self.device.set_device_report_path(request.config.report_path)
         self.start_hilog_task(log_size=hilog_size, log_level=log_level)
 
     def stop_catch_log(self, request, **kwargs):
-        self.remove_log_address(self.device_log.get(self.device.device_sn, None),
-                                self.hilog.get(self.device.device_sn, None))
-        serial = "{}_{}".format(str(self.device.__get_serial__()), time.time_ns())
-        log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
+        device_log_cfg = request.config.get(ConfigConst.device_log, {})
+        device_log_on = device_log_cfg.get(ConfigConst.tag_enable) or ConfigConst.device_log_on
+        if device_log_on != ConfigConst.device_log_on:
+            return
+        each_case = device_log_cfg.get("each_case") or "false"
+        device_sn = self.device.device_sn
+        self.remove_log_address(
+            self.device_log.get(device_sn, None),
+            self.hilog.get(device_sn, None)
+        )
+        # 只在用例失败的时候，抓取设备日志
+        test_result = getattr(self.device, "_test_result", "")
+        enable1 = not test_result or test_result == "Passed"
+        enable2 = each_case.lower() == "true"
+        if enable1 and not enable2:
+            self._hilog_begin_time = None
+            return
+        log_name = str(device_sn).replace(":", "_")
+        # 若有传递用例名称，则hilog日志的存放文件夹名称加上用例标识
+        test_name = kwargs.get("test_name")
+        if test_name:
+            log_name = f"{log_name}_{test_name}"
         self.stop_hilog_task(
-            log_tar_file_name,
+            log_name,
             module_name=request.get_module_name(),
-            extras_dirs=request.config.device_log.get(ConfigConst.tag_dir),
+            extras_dirs=device_log_cfg.get(ConfigConst.tag_dir),
             repeat=request.config.repeat,
             repeat_round=request.get_repeat_round())
+        self._hilog_begin_time = None
