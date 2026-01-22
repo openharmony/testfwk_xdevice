@@ -493,6 +493,20 @@ class DataHelper:
         for k, v in attr.items():
             _old.set(k, v)
 
+    @staticmethod
+    def is_result_xml_has_failure_case(result_xml: str):
+        if not result_xml or not os.path.exists(result_xml):
+            return False
+        root = DataHelper.parse_data_report(result_xml)
+        fail_cnt = 0
+        attrs = [ReportConstant.disabled, ReportConstant.errors, ReportConstant.failures, ReportConstant.unavailable]
+        for attr in attrs:
+            cnt = root.get(attr) or "0"
+            if not cnt.isnumeric():
+                continue
+            fail_cnt += int(cnt)
+        return fail_cnt > 0
+
 
 @dataclass
 class ExecInfo:
