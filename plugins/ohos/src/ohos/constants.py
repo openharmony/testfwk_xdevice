@@ -18,13 +18,24 @@
 
 from dataclasses import dataclass
 
-__all__ = ["Constant", "ComType", "HostDrivenTestType",
-           "ParserType", "DeviceLiteKernel", "CKit", "ConnectType"]
+__all__ = [
+    "Constant", "ComType", "ParserType", "DeviceLiteKernel",
+    "CKit", "ConnectType", "CaseResult", "InstallErrorCode"
+]
 
 
 class Constant:
     PRODUCT_PARAMS_START = "To Obtain Product Params Start"
     PRODUCT_PARAMS_END = "To Obtain Product Params End"
+
+
+@dataclass
+class CaseResult:
+    passed = "Passed"
+    failed = "Failed"
+    blocked = "Blocked"
+    ignored = "Ignored"
+    unavailable = "Unavailable"
 
 
 @dataclass
@@ -34,15 +45,6 @@ class ComType(object):
     """
     cmd_com = "cmd"
     deploy_com = "deploy"
-
-
-@dataclass
-class HostDrivenTestType(object):
-    """
-    HostDrivenType enumeration
-    """
-    device_test = "DeviceTest"
-    windows_test = "WindowsTest"
 
 
 @dataclass
@@ -102,3 +104,7 @@ class ConnectType:
 @dataclass
 class DriverType(object):
     vulkan_test = "VulkanTest"
+
+
+class InstallErrorCode:
+    code_9568413 = "code:9568413"

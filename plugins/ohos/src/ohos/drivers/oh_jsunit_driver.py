@@ -28,6 +28,7 @@ import zipfile
 import threading
 from typing import Union
 
+from ohos.constants import CaseResult
 from ohos.constants import CKit
 from ohos.drivers import *
 from ohos.drivers.constants import TIME_OUT
@@ -43,6 +44,7 @@ from ohos.utils import setup_teardown
 from ohos.utils import parse_and_modify_report
 from ohos.utils import build_xml
 from xdevice import DataHelper
+from xdevice import HapNotSupportTest
 from xdevice import Request
 
 __all__ = ["oh_jsunit_para_parse", "OHJSUnitTestDriver", "OHJSUnitTestRunner", "OHJSLocalTestDriver"]
@@ -240,6 +242,12 @@ class OHJSUnitTestDriver(IDriver):
             else:
                 LOG.debug("The device not implement start_catch_log function, don't start catch log! Skip!")
             self._run_oh_jsunit(config_file, request)
+        except HapNotSupportTest as e:
+            self.error_message = e
+            self.result = check_result_report(
+                request.config.report_path, self.result, str(e),
+                request=request, result_kind=CaseResult.ignored)
+            raise e
         except Exception as exception:
             self.error_message = exception
             if not getattr(exception, "error_no", ""):
