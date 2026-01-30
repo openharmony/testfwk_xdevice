@@ -40,6 +40,7 @@ from xdevice import get_config_value
 from xdevice import exec_cmd
 from xdevice import ConfigConst
 from xdevice import AppInstallError
+from xdevice import HapNotSupportTest
 from xdevice import convert_serial
 from xdevice import check_path_legal
 from xdevice import modify_props
@@ -50,6 +51,7 @@ from xdevice import check_device_ohca
 from xdevice import Variables
 
 from ohos.constants import CKit
+from ohos.constants import InstallErrorCode
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 from ohos.error import ErrorMessage
@@ -789,24 +791,26 @@ class AppInstallKit(ITestKit):
             device.push_file(hap_file, push_dest)
             self.pushed_hap_file.add(push_dest)
             output = device.execute_shell_command("bm install -p {} {}".format(push_dest, self.ex_args))
-            if not output.startswith("Success") and "successfully" not in output:
-                output = output.strip()
-                if "[ERROR_GET_BUNDLE_INSTALLER_FAILED]" not in output.upper():
-                    raise AppInstallError(ErrorMessage.Device.Code_0303007.format(
-                        push_dest, device.__get_serial__(), output))
-                else:
-                    LOG.info("'[ERROR_GET_BUNDLE_INSTALLER_FAILED]' occurs, "
-                             "retry install hap")
-                    exec_out = self.retry_install_hap(
-                        device, "bm install -p {} {}".format(push_dest, self.ex_args))
-                    if not exec_out.startswith("Success") and "successfully" not in output:
-                        raise AppInstallError(ErrorMessage.Device.Code_0303007.format(
-                            push_dest, device.__get_serial__(), exec_out))
-            else:
+            if output.startswith("Success") or "successfully" in output:
                 LOG.debug("Install %s success" % push_dest)
+                return
+            if "[ERROR_GET_BUNDLE_INSTALLER_FAILED]" in output:
+                LOG.info("[ERROR_GET_BUNDLE_INSTALLER_FAILED] occurs, retry install hap")
+                output = self.retry_install_hap(
+                    device, "bm install -p {} {}".format(push_dest, self.ex_args))
+                if output.startswith("Success") or "successfully" in output:
+                    LOG.debug("Install %s success" % push_dest)
+                    return
+            output = output.strip()
+            err_msg = ErrorMessage.Device.Code_0303007.format(push_dest, device.__get_serial__(), output)
+            # 部分模块安装hap应用报错，需要在测试报告上，将模块的结果显示为ignored。如：
+            # 1、code:9568413, error: check syscap failed and device type is not supported.
+            if InstallErrorCode.code_9568413 in output:
+                raise HapNotSupportTest(err_msg)
+            raise AppInstallError(err_msg)
 
-    @classmethod
-    def retry_install_hap(cls, device, command):
+    @staticmethod
+    def retry_install_hap(device, command):
         real_command = [HdcHelper.CONNECTOR_NAME, "-t", str(device.device_sn), "-s",
                         "tcp:%s:%s" % (str(device.host), str(device.port)),
                         "shell", command]

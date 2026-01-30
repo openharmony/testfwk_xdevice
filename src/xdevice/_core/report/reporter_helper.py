@@ -775,8 +775,9 @@ class VisionHelper:
             self.summary_element.get(ReportConstant.ignored, 0))
         summary.result.unavailable = int(
             self.summary_element.get(ReportConstant.unavailable, 0))
-        summary.result.passed = summary.result.total - summary.result.failed \
-                                - summary.result.blocked - summary.result.ignored
+        pass_cnt = summary.result.total - summary.result.failed - \
+                   summary.result.blocked - summary.result.ignored
+        summary.result.passed = pass_cnt if pass_cnt > 0 else 0
         return summary
 
     def _set_suites_info(self):
@@ -802,8 +803,9 @@ class VisionHelper:
             suite.result.ignored = int(child.get(ReportConstant.ignored)) if \
                 child.get(ReportConstant.ignored) else 0
             suite.result.blocked = errors + disabled
-            suite.result.passed = suite.result.total - suite.result.failed - \
-                                  suite.result.blocked - suite.result.ignored
+            pass_cnt = suite.result.total - suite.result.failed - \
+                       suite.result.blocked - suite.result.ignored
+            suite.result.passed = pass_cnt if pass_cnt > 0 else 0
             suite.time = child.get(ReportConstant.time, "")
             suite.set_cases(child)
             suites.append(suite)
@@ -1331,9 +1333,10 @@ class VisionHelper:
                 "{}{}".format(case_context, self._get_failure_case_title(
                     suite_name, suite.result.total))
             if suite.result.total == 0:
+                render_result = ReportConstant.ignored if suite.result.ignored == 1 else ReportConstant.unavailable
                 case_context = "{}{}".format(
                     case_context, self._get_failure_case_td_context(
-                        0, suite, suite_name, ReportConstant.unavailable))
+                        0, suite, suite_name, render_result))
             else:
                 skipped_num = 0
                 for index, case in enumerate(suite.cases):
@@ -1544,7 +1547,7 @@ class VisionHelper:
     def _get_failure_case_td_context(cls, index, case, suite_name, result):
         failure_case_td_context = "<tr>\n" if index % 2 == 0 else \
             "<tr class='background-color'>\n"
-        if result == ReportConstant.unavailable:
+        if result in [ReportConstant.ignored, ReportConstant.unavailable]:
             test_context = "{}#{}".format(case.module_name, case.name)
             href_id = suite_name
         else:

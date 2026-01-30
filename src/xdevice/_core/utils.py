@@ -419,6 +419,7 @@ def check_result_report(report_root_dir, report_file, error_message="",
     Check whether report_file exits or not. If report_file is not exist,
     create empty report with error_message under report_root_dir
     """
+    error_message = str(error_message)
     if os.path.exists(report_file):
         return report_file
     suite_name = report_name
