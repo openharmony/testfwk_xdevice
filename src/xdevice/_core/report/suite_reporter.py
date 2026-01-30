@@ -78,12 +78,15 @@ class SuiteReporter:
         if len(self.results) != 1:
             LOG.error("Can only create one empty data report once")
             return
+        result_kind = self.kwargs.get(ReportConstant.result_kind)
         suite_result, _ = self.results[0]
 
         # initial test suites element
         test_suites_element, test_suites_attributes, _ = \
             self._initial_test_suites()
-        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
+        if result_kind == CaseResult.ignored:
+            test_suites_attributes[ReportConstant.ignored] = 1
+        elif result_kind == CaseResult.unavailable:
             test_suites_attributes[ReportConstant.unavailable] = 1
         else:
             test_suites_attributes[ReportConstant.disabled] = 1
@@ -95,7 +98,9 @@ class SuiteReporter:
             suite_result)
         test_suite_element.text, test_suite_element.tail = \
             "", self.data_helper.LINE_BREAK
-        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
+        if result_kind == CaseResult.ignored:
+            test_suite_attributes[ReportConstant.ignored] = 1
+        elif result_kind == CaseResult.unavailable:
             test_suite_attributes[ReportConstant.unavailable] = 1
         else:
             test_suite_attributes[ReportConstant.disabled] = 1
